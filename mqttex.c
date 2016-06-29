@@ -1,4 +1,6 @@
 //sudo gcc mqttex.c -o mqttex.sh -L/usr/local/lib -lwiringPi -lmosquitto
+// Library reference http://mosquitto.org/man/libmosquitto-3.html
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -7,6 +9,8 @@
 #include <mosquitto.h>
 #include "read_dht.c"
 #define LED 25
+#define SECONDS 45
+
 //#define host 54.186.199.187
 //#define port 1883
 
@@ -16,7 +20,16 @@ unsigned int activePorts [5]={0,2,3,28,29}; 		//-- PINS
 char t [5];
 char h [5];
 char dp [5];
-char ledstatus [4];
+char ledstatus [5];
+
+char str[40];
+char sensorID[40]	= "RPi3/out/sensor/";
+char temporary[40];
+
+const char tmp[] 	= "Temperature/%d";
+const char hum[] 	= "Humidity/%d";
+const char dewP[] 	= "DewPoint/%d";
+
 
 void my_message_callback(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *message)
 {
@@ -35,7 +48,7 @@ void my_connect_callback(struct mosquitto *mosq, void *userdata, int result)
 	int i;
 	if(!result){
 		/* Subscribe to broker information topics on successful connect. */
-		mosquitto_subscribe(mosq, NULL, "RPi3/in/led/#", 2);
+		mosquitto_subscribe(mosq, NULL, "RPi3/in/led/#", 1);
 	}else{
 		fprintf(stderr, "Connect failed\n");
 	}
@@ -59,7 +72,7 @@ void my_log_callback(struct mosquitto *mosq, void *userdata, int level, const ch
 }
 
 int main(int argc, char *argv[]){
-	int i, counter = 0;
+	int i, counter = SECONDS;
 	
 	const char host[] = "54.186.199.187";
 	int port = 1883;
@@ -90,6 +103,8 @@ int main(int argc, char *argv[]){
 		return 1;
 	}
 	
+	mosquitto_will_set(mosq,"RPi3/out/status",12,"Disconnected",1,true);
+	
 	mosquitto_log_callback_set(mosq, my_log_callback);
 	mosquitto_connect_callback_set(mosq, my_connect_callback);
 	mosquitto_message_callback_set(mosq, my_message_callback);
@@ -99,50 +114,81 @@ int main(int argc, char *argv[]){
 		fprintf(stderr, "Unable to connect.\n");
 		return 1;
 	}
+	else
 	
-	mosquitto_publish (mosq,NULL,"RPI/out",4,"hola",1,false);
-	
+	//mosquitto_publish (mosq,NULL,"RPI/out",4,"hola",1,false);
+	mosquitto_publish (mosq,NULL,"RPi3/out/status",9,"Connected",1,true);
 	//mosquitto_loop_forever(mosq, -1, 1);
+	
 	while(!mosquitto_loop(mosq, -1, 1)){
 	
 		if (!(strcmp ( str_received, "TOGGLE"))){
 			if (digitalRead (LED)){
 				digitalWrite (LED, LOW);
-				sprintf(ledstatus, "ON");
-				sprintf(str_received, "ON");
-				
+				mosquitto_publish (mosq,NULL,"RPi3/out/led/status",3,"OFF",1,true);
+			
 			}
 			else{
 				digitalWrite (LED, HIGH);
-				sprintf(ledstatus, "OFF");
-				sprintf(str_received, "OFF");
-				
+				mosquitto_publish (mosq,NULL,"RPi3/out/led/status",2,"ON",1,true);
+
 			}
-			mosquitto_publish (mosq,NULL,"RPi3/out/led/status",4,ledstatus,1,true);
-			printf ("LED %s \n",ledstatus );
+			
+			sprintf(str_received, "\0");
 		}
 		
 		++counter;
 		
-		if (counter > 45)
-			if (!displayDHTData (0)){
-			
-				sprintf(t, "%2.1f", temperature);
-				sprintf(h, "%2.1f", humidity);
-				sprintf(dp, "%2.1f", dewPoint);
+		if (counter > SECONDS)
+			for (i=0; i<5; i++)
+				if (!displayDHTData (i)){
 				
-				mosquitto_publish (mosq,NULL,"RPi3/out/Sensor/Temperature",4,t,1,false);
-				mosquitto_publish (mosq,NULL,"RPi3/out/Sensor/Humidity",4,h,1,false);
-				mosquitto_publish (mosq,NULL,"RPi3/out/Sensor/DewPoint",4,dp,1,false);		
-				counter = 0;
-			}
+					sprintf(t, "%2.1f", temperature);
+					sprintf(h, "%2.1f", humidity);
+					sprintf(dp, "%2.1f", dewPoint);
+					
+					sprintf (str, tmp, i);
+					strcpy (temporary,sensorID);
+					strcat (sensorID,str);
+					mosquitto_publish (mosq,NULL,sensorID,4,t,1,false);
+					printf("%s\n", sensorID );
+
+					sprintf (str,"\0");
+					sprintf (sensorID,"\0");
+
+					strcpy (sensorID,temporary);
+					sprintf (str, hum, i);
+					strcat (sensorID,str);
+					mosquitto_publish (mosq,NULL,sensorID,4,h,1,false);
+					printf("%s\n", sensorID );
+					
+
+					sprintf (str,"\0");
+					sprintf (sensorID,"\0");
+
+					strcpy (sensorID,temporary);
+					sprintf (str,dewP, i);
+					strcat (sensorID,str);
+					mosquitto_publish (mosq,NULL,sensorID,4,dp,1,false);
+					printf("%s\n", sensorID );
+
+
+					sprintf (str,"\0");
+					sprintf (sensorID,"\0");
+
+					strcpy (sensorID,temporary);
+
+	//				mosquitto_publish (mosq,NULL,"RPi3/out/Sensor/Humidity",4,h,1,false);
+	//				mosquitto_publish (mosq,NULL,"RPi3/out/Sensor/DewPoint",4,dp,1,false);		
+					counter = 0;
+				}
 			
 	/*	if (digitalRead (LED))
 			digitalWrite (LED, LOW);
 		else
 			digitalWrite (LED, HIGH);*/			
 	}
-	
+
 	mosquitto_destroy(mosq);
 	mosquitto_lib_cleanup();
 	return 0;
